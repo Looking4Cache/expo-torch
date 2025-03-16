@@ -11,6 +11,28 @@ import expo.modules.kotlin.Promise
 import android.util.Log
 
 class ExpoTorchModule : Module() {
+  private data class CameraInfo(
+    val cameraId: String,
+    val characteristics: CameraCharacteristics
+  )
+
+  private fun findTorchCamera(cameraManager: CameraManager): CameraInfo? {
+    try {
+      for (cameraId in cameraManager.cameraIdList) {
+        val characteristics = cameraManager.getCameraCharacteristics(cameraId)
+        val hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
+        val isBackCamera = characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
+        
+        if (hasFlash && isBackCamera) {
+          return CameraInfo(cameraId, characteristics)
+        }
+      }
+    } catch (e: CameraAccessException) {
+      Log.e("ExpoTorchModule", "Failed to access camera: ${e.message}")
+    }
+    return null
+  }
+
   override fun definition() = ModuleDefinition {
     Name("ExpoTorch")
 
@@ -18,6 +40,36 @@ class ExpoTorchModule : Module() {
       "ON" to "ON",
       "OFF" to "OFF"
     )
+
+    AsyncFunction("isTorchAvailable") { promise: Promise ->
+      val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: run {
+        promise.resolve(false)
+        return@AsyncFunction
+      }
+
+      promise.resolve(findTorchCamera(cameraManager) != null)
+    }
+
+    AsyncFunction("isBrightnessControllable") { promise: Promise ->
+      val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: run {
+        promise.resolve(false)
+        return@AsyncFunction
+      }
+
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
+        promise.resolve(false)
+        return@AsyncFunction
+      }
+
+      val cameraInfo = findTorchCamera(cameraManager)
+      if (cameraInfo == null) {
+        promise.resolve(false)
+        return@AsyncFunction
+      }
+
+      val maxLevel = cameraInfo.characteristics.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL)
+      promise.resolve(maxLevel != null && maxLevel > 1)
+    }
 
     AsyncFunction("setStateAsync") { state: String, promise: Promise ->
       val cameraManager = context.getSystemService(Context.CAMERA_SERVICE) as? CameraManager ?: run {
@@ -30,30 +82,22 @@ class ExpoTorchModule : Module() {
         return@AsyncFunction
       }
 
-      try {
-        for (cameraId in cameraManager.cameraIdList) {
-          val characteristics = cameraManager.getCameraCharacteristics(cameraId)
-          val hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
-          val isBackCamera = characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-          if (hasFlash && isBackCamera) {
-            try {
-              cameraManager.setTorchMode(cameraId, state == "ON")
-              promise.resolve(null)
-              return@AsyncFunction
-            } catch (e: CameraAccessException) {
-              if (e.reason == CameraAccessException.CAMERA_IN_USE) {
-                Log.e("ExpoTorchModule", "Torch is not available because the camera is in use by another application.")
-                promise.reject("E_CAMERA_IN_USE", "Torch is not available because the camera is in use.", e)
-              } else {
-                promise.reject("E_TORCH_FAILURE", "Failed to set torch state: ${e.message}", e)
-              }
-              return@AsyncFunction
-            }
-          }
-        }
+      val cameraInfo = findTorchCamera(cameraManager)
+      if (cameraInfo == null) {
         promise.reject("E_TORCH_UNAVAILABLE", "Torch is not available on this device.", null)
+        return@AsyncFunction
+      }
+
+      try {
+        cameraManager.setTorchMode(cameraInfo.cameraId, state == "ON")
+        promise.resolve(null)
       } catch (e: CameraAccessException) {
-        promise.reject("E_TORCH_FAILURE", "Failed to access camera characteristics: ${e.message}", e)
+        if (e.reason == CameraAccessException.CAMERA_IN_USE) {
+          Log.e("ExpoTorchModule", "Torch is not available because the camera is in use by another application.")
+          promise.reject("E_CAMERA_IN_USE", "Torch is not available because the camera is in use.", e)
+        } else {
+          promise.reject("E_TORCH_FAILURE", "Failed to set torch state: ${e.message}", e)
+        }
       }
     }
 
@@ -63,45 +107,35 @@ class ExpoTorchModule : Module() {
         return@AsyncFunction
       }
 
-      try {
-        for (cameraId in cameraManager.cameraIdList) {
-          val characteristics = cameraManager.getCameraCharacteristics(cameraId)
-          val hasFlash = characteristics.get(CameraCharacteristics.FLASH_INFO_AVAILABLE) ?: false
-          val isBackCamera = characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_BACK
-          
-          if (hasFlash && isBackCamera) {
-            try {
-              if (level <= 0) {
-                cameraManager.setTorchMode(cameraId, false)
-                promise.resolve(null)
-                return@AsyncFunction
-              }
-
-              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                val maxLevel = characteristics.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL) ?: 1
-                val strengthLevel = (level * maxLevel).toInt().coerceIn(1, maxLevel)
-                cameraManager.turnOnTorchWithStrengthLevel(cameraId, strengthLevel)
-              } else {
-                // Fallback for older Android versions - just turn the torch on/off
-                cameraManager.setTorchMode(cameraId, level > 0)
-              }
-              
-              promise.resolve(null)
-              return@AsyncFunction
-            } catch (e: CameraAccessException) {
-              if (e.reason == CameraAccessException.CAMERA_IN_USE) {
-                Log.e("ExpoTorchModule", "Torch is not available because the camera is in use by another application.")
-                promise.reject("E_CAMERA_IN_USE", "Torch is not available because the camera is in use.", e)
-              } else {
-                promise.reject("E_TORCH_FAILURE", "Failed to set torch brightness: ${e.message}", e)
-              }
-              return@AsyncFunction
-            }
-          }
-        }
+      val cameraInfo = findTorchCamera(cameraManager)
+      if (cameraInfo == null) {
         promise.reject("E_TORCH_UNAVAILABLE", "Torch is not available on this device.", null)
+        return@AsyncFunction
+      }
+
+      try {
+        if (level <= 0) {
+          cameraManager.setTorchMode(cameraInfo.cameraId, false)
+          promise.resolve(null)
+          return@AsyncFunction
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+          val maxLevel = cameraInfo.characteristics.get(CameraCharacteristics.FLASH_INFO_STRENGTH_MAXIMUM_LEVEL) ?: 1
+          val strengthLevel = (level * maxLevel).toInt().coerceIn(1, maxLevel)
+          cameraManager.turnOnTorchWithStrengthLevel(cameraInfo.cameraId, strengthLevel)
+        } else {
+          cameraManager.setTorchMode(cameraInfo.cameraId, level > 0)
+        }
+        
+        promise.resolve(null)
       } catch (e: CameraAccessException) {
-        promise.reject("E_TORCH_FAILURE", "Failed to access camera characteristics: ${e.message}", e)
+        if (e.reason == CameraAccessException.CAMERA_IN_USE) {
+          Log.e("ExpoTorchModule", "Torch is not available because the camera is in use by another application.")
+          promise.reject("E_CAMERA_IN_USE", "Torch is not available because the camera is in use.", e)
+        } else {
+          promise.reject("E_TORCH_FAILURE", "Failed to set torch brightness: ${e.message}", e)
+        }
       }
     }
   }

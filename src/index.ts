@@ -2,8 +2,16 @@ import ExpoTorchModule from "./ExpoTorchModule";
 
 export const { ON, OFF } = ExpoTorchModule;
 
+export async function isTorchAvailable(): Promise<boolean> {
+  return ExpoTorchModule.isTorchAvailable();
+}
+
 export async function setStateAsync(state: string) {
   return ExpoTorchModule.setStateAsync(state);
+}
+
+export async function isBrightnessControllable(): Promise<boolean> {
+  return ExpoTorchModule.isBrightnessControllable();
 }
 
 export async function setBrightnessAsync(level: number) {

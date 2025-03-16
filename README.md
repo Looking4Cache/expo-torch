@@ -25,28 +25,63 @@ npm install expo-torch
 
 Run `npx pod-install` after installing the npm package.
 
-
 ### Configure for Android
 
 # Usage
 
 ```tsx
-import { StyleSheet, View, Button } from "react-native";
+import { StyleSheet, View, Button, Text } from "react-native";
 import * as ExpoTorch from "expo-torch";
 
 export default function App() {
+    const checkTorch = async () => {
+        // Check if device has a torch
+        const hasTorch = await ExpoTorch.isTorchAvailable();
+        if (!hasTorch) {
+            console.log('This device has no torch');
+            return;
+        }
+
+        // Check if brightness control is available
+        const isControllable = await ExpoTorch.isBrightnessControllable();
+        console.log('Can control brightness:', isControllable);
+    };
+
     const on = async () => {
-        await ExpoTorch.setStateAsync(ExpoTorch.ON);
+        if (await ExpoTorch.isTorchAvailable()) {
+            await ExpoTorch.setStateAsync(ExpoTorch.ON);
+        }
     };
 
     const off = async () => {
-        await ExpoTorch.setStateAsync(ExpoTorch.OFF);
+        if (await ExpoTorch.isTorchAvailable()) {
+            await ExpoTorch.setStateAsync(ExpoTorch.OFF);
+        }
+    };
+
+    const setHalfBrightness = async () => {
+        // First check if device has a torch
+        if (!await ExpoTorch.isTorchAvailable()) {
+            console.log('This device has no torch');
+            return;
+        }
+
+        // Then check if brightness control is available
+        if (await ExpoTorch.isBrightnessControllable()) {
+            // Set torch to 50% brightness
+            await ExpoTorch.setBrightnessAsync(0.5);
+        } else {
+            // Fallback to full brightness if control is not available
+            await ExpoTorch.setStateAsync(ExpoTorch.ON);
+        }
     };
 
     return (
         <View style={styles.container}>
+            <Button title="Check Torch" onPress={checkTorch} />
             <Button title="ON" onPress={on} />
             <Button title="OFF" onPress={off} />
+            <Button title="50% Brightness" onPress={setHalfBrightness} />
         </View>
     );
 }

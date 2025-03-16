@@ -13,6 +13,22 @@ public class ExpoTorchModule: Module {
       "OFF": self.TorchStateOff
     ])
 
+    AsyncFunction("isTorchAvailable") { (promise: Promise) in
+      guard let device = AVCaptureDevice.default(for: .video) else {
+        promise.resolve(false)
+        return
+      }
+      promise.resolve(device.hasTorch)
+    }
+
+    AsyncFunction("isBrightnessControllable") { (promise: Promise) in
+      guard let device = AVCaptureDevice.default(for: .video) else {
+        promise.resolve(false)
+        return
+      }
+      promise.resolve(device.hasTorch)
+    }
+
     AsyncFunction("setStateAsync") { (state: String, promise: Promise) in
       guard let device = AVCaptureDevice.default(for: .video), device.hasTorch else {
         promise.reject("E_TORCH_UNAVAILABLE", "Torch is not available on this device.")
