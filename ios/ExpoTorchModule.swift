@@ -38,5 +38,28 @@ public class ExpoTorchModule: Module {
         promise.reject("E_TORCH_FAILURE", "Failed to set torch state: \(error)")
       }
     }
+
+    AsyncFunction("setBrightnessAsync") { (level: Double, promise: Promise) in
+      guard let device = AVCaptureDevice.default(for: .video), device.hasTorch else {
+        promise.reject("E_TORCH_UNAVAILABLE", "Torch is not available on this device.")
+        return
+      }
+
+      do {
+        try device.lockForConfiguration()
+        
+        if level <= 0 {
+          device.torchMode = .off
+        } else {
+          try device.setTorchModeOn(level: Float(level))
+        }
+        
+        device.unlockForConfiguration()
+        promise.resolve(nil)
+      } catch let error {
+        device.unlockForConfiguration()
+        promise.reject("E_TORCH_FAILURE", "Failed to set torch brightness: \(error)")
+      }
+    }
   }
 }
